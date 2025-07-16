@@ -1,0 +1,9 @@
+.program bit_rx
+
+; One byte per rising edge
+
+.wrap_target     
+    wait 1 pin 8     
+    in   pins, 8 
+    wait 0 pin 8      
+.wrap
