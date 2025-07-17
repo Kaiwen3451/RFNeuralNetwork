@@ -49,7 +49,9 @@ static float hann[FFT_SIZE];
 // real and imag part of frequency bins after fft_float
 // passed into the NN as a magnitude, and since all FFT inputs are real we take half of the spectrogram
 static float fr[FFT_SIZE], fi[FFT_SIZE];
-static float mag_buf[FFT_HALF];
+static float mag_buf_a[FFT_HALF];
+static float mag_buf_b[FFT_HALF];
+static bool use_mag_a = true;
 
 // -----------------------------------------------------------------------------
 // Helpers 
@@ -72,7 +74,7 @@ static void bit_reverse(void) {
         mr >>= SHIFT;
         if (mr <= m) continue;
         float t = fr[m]; fr[m] = fr[mr]; fr[mr] = t;
-        t    = fi[m]; fi[m] = fi[mr]; fi[mr] = t;
+        t = fi[m]; fi[m] = fi[mr]; fi[mr] = t;
     }
 }
 
@@ -100,7 +102,7 @@ static void fft_float(void) {
 }
 
 // -----------------------------------------------------------------------------
-// DMA interrupt handler
+// dma_handler
 // -----------------------------------------------------------------------------
 void dma_handler() {
     dma_hw->ints0 = 1u << dma_chan; // clear interrupt flag
@@ -113,17 +115,18 @@ void dma_handler() {
         fr[i] = x * hann[i]; // windowing it
         fi[i] = 0;
     }
-
     fft_float();
 
+    float *this_mag = use_mag_a ? mag_buf_a : mag_buf_b;
+    // do a fast approx instead of sqrt https://dspguru.com/dsp/tricks/magnitude-estimator/
     for (int i = 0; i < FFT_HALF; i++) {
-        mag_buf[i] = hypotf(fr[i], fi[i]);
+        float a = fabsf(fr[i]);
+        float b = fabsf(fi[i]);
+        if (b > a) { float t = a; a = b; b = t; }
+        this_mag[i] = a + 0.25f * b;
     }
-
-    if (multicore_fifo_wready()) {
-        multicore_fifo_push_blocking((uintptr_t)mag_buf);
-    } else {
-    }
+    multicore_fifo_push_blocking((uintptr_t)this_mag);
+    use_mag_a = !use_mag_a;
 
     uint32_t *next = use_a ? buffer_b : buffer_a;
     dma_channel_set_write_addr(dma_chan, next, true);
@@ -131,7 +134,7 @@ void dma_handler() {
 }
 
 // -----------------------------------------------------------------------------
-// Main
+// main
 // -----------------------------------------------------------------------------
 void main(void) {
 

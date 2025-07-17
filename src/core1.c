@@ -18,7 +18,7 @@ static float nn_input[FC_INPUT_SIZE];
 static float nn_output[FC_OUTPUT_SIZE];
 
 // -----------------------------------------------------------------------------
-// Functions
+// Functions (legacy)
 // -----------------------------------------------------------------------------
 
 // converts 8-bit samples (MSB of each word) to float and normalize
@@ -52,10 +52,10 @@ void core1_main(void) {
     
         lin(mag, fc_weights, fc_biases, nn_output, FC_INPUT_SIZE, FC_OUTPUT_SIZE);
 
-        static uint32_t frame_no = 0;
-        if (++frame_no >= 50) {         
-            frame_no = 0;
-           for (int i = 0; i < FC_OUTPUT_SIZE; ++i)
+        static uint32_t x = 0; // printing every 100 so serial monitor doesn't die
+        if (++x >= 100) {         
+            x = 0;
+            for (int i = 0; i < FC_OUTPUT_SIZE; ++i)
                 printf("%2d:% .2f ", i, nn_output[i]);
             printf("\n");
         }

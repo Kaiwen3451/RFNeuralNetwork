@@ -10,7 +10,6 @@ void lin(const sample_t *in,
          sample_t       *out,
          size_t          in_dim,
          size_t          out_dim) {
-    // Fully-connected: out = W * in + b
     for (size_t j = 0; j < out_dim; j++) {
         sample_t acc = b[j];
         for (size_t i = 0; i < in_dim; i++) {
@@ -34,7 +33,6 @@ void conv(const sample_t *in,
     for (size_t i = 0; i < i_rows; i++) {
         for (size_t j = 0; j < i_cols; j++) {
             sample_t acc = 0;
-            // Slide the kernel over the input centered at (i, j)
             for (size_t ki = 0; ki < k_rows; ki++) {
                 for (size_t kj = 0; kj < k_cols; kj++) {
                     ptrdiff_t in_r = (ptrdiff_t)i + (ptrdiff_t)ki - p_row;
