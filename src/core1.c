@@ -50,17 +50,13 @@ void core1_main(void) {
         uintptr_t raw = multicore_fifo_pop_blocking();
         float *mag = (float*)raw;
     
-        for (int i = 0; i < FC_INPUT_SIZE; i++) {
-            nn_input[i] = mag[i];
-        }
-
-        lin(nn_input, fc_weights, fc_biases, nn_output, FC_INPUT_SIZE, FC_OUTPUT_SIZE);
+        lin(mag, fc_weights, fc_biases, nn_output, FC_INPUT_SIZE, FC_OUTPUT_SIZE);
 
         static uint32_t frame_no = 0;
-        if (++frame_no >= 100) {            // print 1 / 100 frames
+        if (++frame_no >= 50) {         
             frame_no = 0;
            for (int i = 0; i < FC_OUTPUT_SIZE; ++i)
-                printf("%2d:% .4f ", i, nn_output[i]);
+                printf("%2d:% .2f ", i, nn_output[i]);
             printf("\n");
         }
         

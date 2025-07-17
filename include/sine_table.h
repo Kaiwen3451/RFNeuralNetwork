@@ -5,6 +5,6 @@
 
 #define NUM_SAMPLES 512
 
-extern const int16_t Sinewave[NUM_SAMPLES];
+extern const float Sinewave[NUM_SAMPLES];
 
 #endif
