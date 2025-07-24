@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#define NUM_SAMPLES 512
+#define NUM_SAMPLES 2048
 
 extern const float Sinewave[NUM_SAMPLES];
 

@@ -22,9 +22,9 @@
 #define DATA_BASE_PIN  0 // assume ADC has 8-bit res
 #define DATA_VALID     8 // at ADC's output speed
 
-#define FFT_SIZE       512 
+#define FFT_SIZE       2048 
 #define FFT_HALF       (FFT_SIZE/2) // do these at compile time for the FFT
-#define LOG2_FFT       9          
+#define LOG2_FFT       11          
 #define SHIFT          (16 - LOG2_FFT)
 
 // -----------------------------------------------------------------------------
@@ -32,10 +32,10 @@
 // -----------------------------------------------------------------------------
 
 // ping-pong buffers using 32-bit (FIFO width) words
-// size determined by how many points we are taking per FFT  
+// size (how many words) determined by how many points we are taking per FFT  
 static uint32_t buffer_a[FFT_SIZE] __attribute__((aligned(4)));   
 static uint32_t buffer_b[FFT_SIZE] __attribute__((aligned(4))); 
-static bool use_a = true;
+static bool     use_a = true;
 
 // holds the DMA channel index returned by dma_claim_unused_channel()
 static int dma_chan;
@@ -48,10 +48,27 @@ static float hann[FFT_SIZE];
 
 // real and imag part of frequency bins after fft_float
 // passed into the NN as a magnitude, and since all FFT inputs are real we take half of the spectrogram
-static float fr[FFT_SIZE], fi[FFT_SIZE];
-static float mag_buf_a[FFT_HALF];
+static float fr[FFT_SIZE];
+static float fi[FFT_SIZE];
+static float mag_buf_a[FFT_HALF]; // also ping-pong
 static float mag_buf_b[FFT_HALF];
-static bool use_mag_a = true;
+static bool  use_mag_a = true;
+
+// feature extraction on the FFT output 
+typedef struct {
+    float centroid;
+    float bandwidth;
+    float entropy;
+    float peak1; 
+    float peak2;
+    float peak3;
+} features_t;
+
+#define FEAT_RING_LEN 32                     // 32 × 24 B  ≈ 768 B
+static features_t feat_ring[FEAT_RING_LEN];
+static volatile uint8_t feat_wr = 0;
+static volatile uint8_t feat_rd = 0;
+
 
 // -----------------------------------------------------------------------------
 // Helpers 
@@ -84,7 +101,7 @@ static void fft_float(void) {
     while (half < FFT_SIZE) {
         int step = half << 1;
         for (int m = 0; m < half; m++) {
-            float wr =  0.5f *  Sinewave[m << shift];
+            float wr =  0.5f * Sinewave[m << shift];
             float wi = -0.5f * Sinewave[(m << shift) + FFT_SIZE/4];
             for (int i = m; i < FFT_SIZE; i += step) {
                 int j = i + half;
@@ -101,36 +118,71 @@ static void fft_float(void) {
     }
 }
 
+static void extract_features(const float *mag, features_t *f)
+{
+    float M0 = 0;
+    float M1 = 0;
+    float H  = 0;
+    float peak1 = 0;
+    float peak2 = 0;
+    float peak3 = 0;
+
+    for (int i = 0; i < FFT_HALF; ++i) {
+        float m = mag[i];
+        M0 += m;
+        M1 += m * i;
+        H  += m * logf(m + 1e-6f);
+
+        if (m > peak1) { peak3 = peak2; peak2 = peak1; peak1 = m; }
+        else if (m > peak2) { peak3 = peak2; peak2 = m; }
+        else if (m > peak3) { peak3 = m; }
+    }
+
+    f->centroid  = M1 / (M0 + 1e-6f);
+    f->bandwidth = sqrtf(f->centroid * (FFT_HALF - f->centroid)); 
+    f->entropy   = -H / (M0 + 1e-6f);
+    f->peak1 = peak1;  f->peak2 = peak2;  f->peak3 = peak3;
+}
+
+
+
 // -----------------------------------------------------------------------------
 // dma_handler
 // -----------------------------------------------------------------------------
 void dma_handler() {
     dma_hw->ints0 = 1u << dma_chan; // clear interrupt flag
 
-    uint32_t *src = use_a ? buffer_a : buffer_b;
+    uint32_t *raw = use_a ? buffer_a : buffer_b;
 
     for (int i = 0; i < FFT_SIZE; i++) {
-        uint8_t s = (src[i] >> 24) & 0xFF;
+        uint8_t s = (raw[i] >> 24) & 0xFF;
         float x = (s / 255.0f) - 0.5f; // normalize to [-1/2,1/2]
         fr[i] = x * hann[i]; // windowing it
-        fi[i] = 0;
     }
     fft_float();
 
-    float *this_mag = use_mag_a ? mag_buf_a : mag_buf_b;
+    float *mag = use_mag_a ? mag_buf_a : mag_buf_b;
     // do a fast approx instead of sqrt https://dspguru.com/dsp/tricks/magnitude-estimator/
     for (int i = 0; i < FFT_HALF; i++) {
         float a = fabsf(fr[i]);
         float b = fabsf(fi[i]);
         if (b > a) { float t = a; a = b; b = t; }
-        this_mag[i] = a + 0.25f * b;
+        mag[i] = a + 0.25f * b;
     }
-    multicore_fifo_push_blocking((uintptr_t)this_mag);
     use_mag_a = !use_mag_a;
 
-    uint32_t *next = use_a ? buffer_b : buffer_a;
-    dma_channel_set_write_addr(dma_chan, next, true);
-    use_a = !use_a;
+    features_t *dst = &feat_ring[feat_wr];
+    extract_features(mag, dst);
+
+    uint8_t next_wr = (feat_wr + 1) & (FEAT_RING_LEN - 1);
+    if (next_wr != feat_rd) {
+        feat_wr = next_wr;
+    }       
+
+    multicore_fifo_push_blocking((uintptr_t)dst);
+    uint32_t *next_raw = use_a ? buffer_b : buffer_a;
+    dma_channel_set_write_addr(dma_chan, next_raw, true);
+    use_a = !use_a;   
 }
 
 // -----------------------------------------------------------------------------

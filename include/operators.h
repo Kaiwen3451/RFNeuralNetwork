@@ -6,7 +6,6 @@
 
 typedef float sample_t;
 
-
 void lin(const sample_t *in,
          const sample_t *W,
          const sample_t *b,
@@ -22,4 +21,4 @@ void conv(const sample_t *in,
           size_t          k_rows,
           size_t          k_cols);
 
-#endif // OPERATORS_H
+#endif 
